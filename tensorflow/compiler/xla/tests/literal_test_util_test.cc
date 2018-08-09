@@ -35,7 +35,7 @@ TEST(LiteralTestUtilTest, ComparesEqualTuplesEqual) {
       LiteralUtil::CreateR0<int32>(42).get(),
       LiteralUtil::CreateR0<int32>(64).get(),
   });
-  LiteralTestUtil::ExpectEqual(*literal, *literal);
+  EXPECT_TRUE(LiteralTestUtil::Equal(*literal, *literal));
 }
 
 TEST(LiteralTestUtilTest, ComparesUnequalTuplesUnequal) {
@@ -83,19 +83,55 @@ TEST(LiteralTestUtilTest, ExpectNearFailurePlacesResultsInTemporaryDirectory) {
   LOG(INFO) << "results: [" << tensorflow::str_util::Join(results, ", ") << "]";
   EXPECT_EQ(3, results.size());
   for (const string& result : results) {
-    Literal literal;
+    LiteralProto literal_proto;
     TF_CHECK_OK(tensorflow::ReadBinaryProto(tensorflow::Env::Default(), result,
-                                            &literal));
+                                            &literal_proto));
+    std::unique_ptr<Literal> literal =
+        Literal::CreateFromProto(literal_proto).ConsumeValueOrDie();
     if (result.find("expected") != string::npos) {
-      EXPECT_EQ("2", LiteralUtil::ToString(literal));
+      EXPECT_EQ("2", literal->ToString());
     } else if (result.find("actual") != string::npos) {
-      EXPECT_EQ("4", LiteralUtil::ToString(literal));
-    } else if (result.find("miscompares") != string::npos) {
-      EXPECT_EQ("true", LiteralUtil::ToString(literal));
+      EXPECT_EQ("4", literal->ToString());
+    } else if (result.find("mismatches") != string::npos) {
+      EXPECT_EQ("true", literal->ToString());
     } else {
       FAIL() << "unknown file in temporary directory: " << result;
     }
   }
+}
+
+TEST(LiteralTestUtilTest, NotEqualHasValuesInMessage) {
+  auto expected = LiteralUtil::CreateR1<int32>({1, 2, 3});
+  auto actual = LiteralUtil::CreateR1<int32>({4, 5, 6});
+  ::testing::AssertionResult result =
+      LiteralTestUtil::Equal(*expected, *actual);
+  EXPECT_THAT(result.message(), ::testing::HasSubstr("expected: {1, 2, 3}"));
+  EXPECT_THAT(result.message(), ::testing::HasSubstr("actual:   {4, 5, 6}"));
+}
+
+TEST(LiteralTestUtilTest, NearComparatorR1) {
+  auto a = LiteralUtil::CreateR1<float>(
+      {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8});
+  auto b = LiteralUtil::CreateR1<float>(
+      {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8});
+  EXPECT_TRUE(LiteralTestUtil::Near(*a, *b, ErrorSpec{0.0001}));
+}
+
+TEST(LiteralTestUtilTest, NearComparatorR1Nan) {
+  auto a = LiteralUtil::CreateR1<float>(
+      {0.0, 0.1, 0.2, 0.3, NAN, 0.5, 0.6, 0.7, 0.8});
+  auto b = LiteralUtil::CreateR1<float>(
+      {0.0, 0.1, 0.2, 0.3, NAN, 0.5, 0.6, 0.7, 0.8});
+  EXPECT_TRUE(LiteralTestUtil::Near(*a, *b, ErrorSpec{0.0001}));
+}
+
+TEST(LiteralTestUtil, NearComparatorDifferentLengths) {
+  auto a = LiteralUtil::CreateR1<float>(
+      {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8});
+  auto b =
+      LiteralUtil::CreateR1<float>({0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7});
+  EXPECT_FALSE(LiteralTestUtil::Near(*a, *b, ErrorSpec{0.0001}));
+  EXPECT_FALSE(LiteralTestUtil::Near(*b, *a, ErrorSpec{0.0001}));
 }
 
 }  // namespace

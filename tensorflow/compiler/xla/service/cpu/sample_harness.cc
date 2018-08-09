@@ -19,11 +19,11 @@ limitations under the License.
 #include "tensorflow/compiler/xla/array4d.h"
 #include "tensorflow/compiler/xla/client/client.h"
 #include "tensorflow/compiler/xla/client/client_library.h"
-#include "tensorflow/compiler/xla/client/computation.h"
-#include "tensorflow/compiler/xla/client/computation_builder.h"
 #include "tensorflow/compiler/xla/client/global_data.h"
 #include "tensorflow/compiler/xla/client/local_client.h"
-#include "tensorflow/compiler/xla/literal_util.h"
+#include "tensorflow/compiler/xla/client/xla_builder.h"
+#include "tensorflow/compiler/xla/client/xla_computation.h"
+#include "tensorflow/compiler/xla/literal.h"
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/types.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
@@ -49,13 +49,13 @@ int main(int argc, char** argv) {
       client->TransferToServer(*param1_literal).ConsumeValueOrDie();
 
   // Build computation.
-  xla::ComputationBuilder builder(client, "");
-  auto p0 = builder.Parameter(0, param0_literal->shape(), "param0");
-  auto p1 = builder.Parameter(1, param1_literal->shape(), "param1");
-  auto add = builder.Add(p1, p0, {0});
+  xla::XlaBuilder builder("");
+  auto p0 = Parameter(&builder, 0, param0_literal->shape(), "param0");
+  auto p1 = Parameter(&builder, 1, param1_literal->shape(), "param1");
+  Add(p1, p0, {0});
 
-  xla::StatusOr<xla::Computation> computation_status = builder.Build();
-  xla::Computation computation = computation_status.ConsumeValueOrDie();
+  xla::StatusOr<xla::XlaComputation> computation_status = builder.Build();
+  xla::XlaComputation computation = computation_status.ConsumeValueOrDie();
 
   // Execute and transfer result of computation.
   xla::ExecutionProfile profile;
@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
 
   LOG(INFO) << tensorflow::strings::Printf("computation took %lldns",
                                            profile.compute_time_ns());
-  LOG(INFO) << xla::LiteralUtil::ToString(*actual);
+  LOG(INFO) << actual->ToString();
 
   return 0;
 }

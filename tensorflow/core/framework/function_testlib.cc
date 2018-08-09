@@ -16,7 +16,10 @@ limitations under the License.
 #include "tensorflow/core/framework/function_testlib.h"
 
 #include "tensorflow/core/framework/function.h"
+#include "tensorflow/core/framework/node_def.pb.h"
 #include "tensorflow/core/framework/tensor_testutil.h"
+#include "tensorflow/core/framework/versions.pb.h"
+#include "tensorflow/core/lib/core/threadpool.h"
 #include "tensorflow/core/public/version.h"
 
 namespace tensorflow {
@@ -42,13 +45,12 @@ GraphDef GDef(gtl::ArraySlice<NodeDef> nodes,
 }
 
 // Helper to construct a NodeDef.
-NodeDef NDef(const string& name, const string& op,
-             gtl::ArraySlice<string> inputs,
+NodeDef NDef(StringPiece name, StringPiece op, gtl::ArraySlice<string> inputs,
              gtl::ArraySlice<std::pair<string, FDH::AttrValueWrapper>> attrs,
              const string& device) {
   NodeDef n;
-  n.set_name(name);
-  n.set_op(op);
+  n.set_name(name.ToString());
+  n.set_op(op.ToString());
   for (const auto& in : inputs) n.add_input(in);
   n.set_device(device);
   for (auto na : attrs) n.mutable_attr()->insert({na.first, na.second.proto});
@@ -71,6 +73,24 @@ FunctionDef NonZero() {
       });
 }
 
+FunctionDef IsZero() {
+  const Tensor kZero = test::AsScalar<int64>(0);
+  return FDH::Define(
+      // Name
+      "IsZero",
+      // Args
+      {"x: T"},
+      // Return values
+      {"equal: T"},
+      // Attr def
+      {"T:{float, double, int32, int64, string}"},
+      {
+          {{"zero"}, "Const", {}, {{"value", kZero}, {"dtype", DT_INT64}}},
+          {{"cast"}, "Cast", {"zero"}, {{"SrcT", DT_INT64}, {"DstT", "$T"}}},
+          {{"equal"}, "Equal", {"x", "cast"}, {{"T", "$T"}}},
+      });
+}
+
 FunctionDef XTimesTwo() {
   const Tensor kTwo = test::AsScalar<int64>(2);
   return FDH::Define(
@@ -87,6 +107,26 @@ FunctionDef XTimesTwo() {
           {{"two"}, "Const", {}, {{"value", kTwo}, {"dtype", DT_INT64}}},
           {{"scale"}, "Cast", {"two"}, {{"SrcT", DT_INT64}, {"DstT", "$T"}}},
           {{"y"}, "Mul", {"x", "scale"}, {{"T", "$T"}}},
+      });
+}
+
+FunctionDef XTimesTwoInt32() {
+  const Tensor kTwo = test::AsScalar<int64>(2);
+  return FDH::Define(
+      // Name
+      "XTimesTwoInt32",
+      // Args
+      {"x: int32"},
+      // Return values
+      {"y: int32"}, {},
+      // Nodes
+      {
+          {{"two"}, "Const", {}, {{"value", kTwo}, {"dtype", DT_INT64}}},
+          {{"scale"},
+           "Cast",
+           {"two"},
+           {{"SrcT", DT_INT64}, {"DstT", DT_INT32}}},
+          {{"y"}, "Mul", {"x", "scale"}, {{"T", DT_INT32}}},
       });
 }
 
@@ -160,6 +200,29 @@ FunctionDef Swap() {
       // Nodes
       {{{"o0"}, "Identity", {"i1"}, {{"T", "$T"}}},
        {{"o1"}, "Identity", {"i0"}, {{"T", "$T"}}}});
+}
+
+FunctionDef InvalidControlFlow() {
+  return FDH::Create(
+      // Name
+      "InvalidControlFlow",
+      // Args
+      {"i: int32"},
+      // Return values
+      {"o: int32"},
+      // Attr def
+      {},
+      // Nodes
+      {{{"enter"}, "Enter", {"i"}, {{"T", DT_INT32}, {"frame_name", "while"}}},
+       {{"add"}, "Add", {"enter:output", "i"}, {{"T", DT_INT32}}}},
+      // Output mapping
+      {{"o", "add:z"}});
+}
+
+void FunctionTestSchedClosure(std::function<void()> fn) {
+  static thread::ThreadPool* w =
+      new thread::ThreadPool(Env::Default(), "Test", 8);
+  w->Schedule(std::move(fn));
 }
 
 }  // end namespace function
